@@ -27,6 +27,7 @@ ffmpeg-bench/
 │   ├── parallel_vs_sequential.sh   Parallel vs sequential throughput
 │   ├── parallel_mp3_vs_mp4.sh      Parallel mp3 conversion vs mp4 re-encode
 │   ├── chunked_vs_whole.sh         Chunk-then-convert vs direct conversion
+│   ├── mp3_vs_mp4.sh               Split/chunk/process: mp3 vs mp4 pipelines
 │   └── resource_efficiency.sh      Peak memory, CPU%, parallel contention
 ├── inputs/                        Your media goes here (or auto-generated)
 │   ├── mp4/   test_default_*.mp4, test_short_*.mp4
@@ -82,6 +83,7 @@ and honors environment variables (`DIFFICULTY`, `PARALLEL_JOBS`, `CHUNK_COUNTS`,
 | `parallel_vs_sequential` | Total time + speedup + efficiency at j=1,2,4,... |
 | `parallel_mp3_vs_mp4` | Parallel throughput for mp3 conversion vs mp4 re-encode + ratio |
 | `chunked_vs_whole` | Whole-file vs chunked (count/timestamp) conversion, split vs convert timing, produced-chunk counts; `copy` and `exact` split strategies |
+| `mp3_vs_mp4` | Side-by-side mp3 vs mp4 for: splitting (time/count), chunking (split→convert→concat), processing (mp3↔mp3, mp4↔mp4, mp4→mp3, mp3→mp4). Reports wall time, produced chunks, and resource stats (peak RSS, CPU%, concurrency) via per-process and pool monitors |
 | `resource_efficiency` | Peak RSS + average CPU% for single/multi-thread, re-encode, parallel pairs, stream copy |
 
 ## Installing just ffmpeg

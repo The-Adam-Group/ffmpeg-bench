@@ -188,6 +188,104 @@ monitor_process() {
     echo "{\"peak_rss_kb\":$peak_rss,\"avg_cpu_percent\":$avg_cpu,\"samples\":$samples}"
 }
 
+# ps snapshot of a single column for one pid, pipefail-safe (never fails,
+# returns '' when the process is gone or a zombie). Matching a just-exited
+# ffmpeg makes `ps -p` exit non-zero, which under `set -o pipefail` would
+# otherwise kill the monitoring subshell.
+pso() {   # pso COLUMN PID
+    local out
+    out=$(ps -o "$1"= -p "$2" 2>/dev/null | tr -d ' ') || out=""
+    printf '%s' "$out"
+}
+
+# Lists pids of live ffmpeg processes that belong to OUR process subtree
+# (descendants of this shell). Matches on executable name, never on cmdline,
+# so no unrelated process can ever be counted or self-matched.
+ffmpeg_pids() {
+    local ffproc
+    ffproc=$(basename "${FFMPEG:-ffmpeg}")
+    local -a stack out
+    stack=("$$")
+    out=()
+
+    while ((${#stack[@]})); do
+        local p="${stack[0]}"
+        stack=("${stack[@]:1}")
+        local kids
+        kids=$(ps -e -o pid=,ppid= 2>/dev/null | awk -v p="$p" '$2==p{print $1}') || kids=""
+        for k in $kids; do
+            stack+=("$k")
+            out+=("$k")
+        done
+    done
+
+    local pid comm
+    for pid in "${out[@]}"; do
+        comm=$(pso comm "$pid")
+        if [[ "$comm" == "$ffproc" ]]; then
+            echo "$pid"
+        fi
+    done
+    return 0
+}
+
+# Samples ALL ffmpeg processes in a window (multi-process phases: splitting,
+# chunking). Stops shortly after every ffmpeg process has exited.
+# Usage:
+#   monitor_ffmpeg_pool 100 300 > mon.json &   # start before the phase
+#   ... run phase ...
+#   wait; # collect stats
+monitor_ffmpeg_pool() {
+    local interval_ms="${1:-100}"
+    local max_seconds="${2:-300}"
+    local interval_s
+    interval_s=$(calc "$interval_ms / 1000" 3)
+
+    local peak_rss=0 peak_count=0 total_cpu=0 samples=0 idle_ticks=0
+    local grace_ticks=10   # ~1s of idle after last ffmpeg before stopping
+    local elapsed=0
+
+    while true; do
+        local rows
+        rows=$(ffmpeg_pids)
+        local count=0
+        if [[ -n "$rows" ]]; then
+            count=$(echo "$rows" | sed '/^$/d' | wc -l | tr -d ' ')
+        fi
+
+        if (( count > 0 )); then
+            idle_ticks=0
+            local rss=0 cpu=0 pid
+            for pid in $rows; do
+                local r c
+                r=$(pso rss "$pid")
+                c=$(pso %cpu "$pid")
+                rss=$((rss + ${r:-0}))
+                cpu=$(calc "$cpu + ${c:-0}" 0)
+            done
+            if (( rss > peak_rss )); then peak_rss=$rss; fi
+            if (( count > peak_count )); then peak_count=$count; fi
+            total_cpu=$(calc "$total_cpu + $cpu" 0)
+            samples=$((samples + 1))
+        else
+            idle_ticks=$((idle_ticks + 1))
+        fi
+
+        elapsed=$(calc "$elapsed + $interval_s" 3)
+        if (( idle_ticks >= grace_ticks )) || (( $(calc_gt "$elapsed" "$max_seconds") )); then
+            break
+        fi
+        sleep "$interval_s"
+    done
+
+    local avg_cpu=0
+    if (( samples > 0 )); then
+        avg_cpu=$(calc "$total_cpu / $samples" 2)
+    fi
+
+    echo "{\"peak_pool_rss_kb\":$peak_rss,\"peak_concurrent_ffmpeg\":$peak_count,\"avg_cpu_total_percent\":$avg_cpu,\"samples\":$samples}"
+}
+
 # --- Cleanup trap ---
 cleanup() {
     # Kill any background ffmpeg processes we started

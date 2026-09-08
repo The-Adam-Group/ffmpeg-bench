@@ -13,7 +13,7 @@
     "total_gb": 23.4
   },
   "disk": {
-    "write_test": "104857600 bytes (105 MB, 100 MiB) copied, 0.0872117 s, 1.2 GB/s"
+    "write_test": "104857600 bytes (105 MB, 100 MiB) copied, 0.0866268 s, 1.2 GB/s"
   },
   "ffmpeg": {
     "version": "ffmpeg version n9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",

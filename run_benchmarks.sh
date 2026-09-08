@@ -23,6 +23,7 @@ ALL_BENCHMARKS=(
     "clip_split"
     "parallel_vs_sequential"
     "parallel_mp3_vs_mp4"
+    "mp3_vs_mp4"
     "chunked_vs_whole"
     "resource_efficiency"
 )
@@ -38,6 +39,7 @@ Benchmarks to run (default: all):
     clip_split              Clip splitting speed
     parallel_vs_sequential  Parallel vs sequential throughput
     parallel_mp3_vs_mp4     Parallel mp3 conversion vs parallel mp4 re-encode
+    mp3_vs_mp4              Split/chunk/process: mp3 pipeline vs mp4 pipeline
     chunked_vs_whole        Chunked vs whole-file conversion
     resource_efficiency     Peak memory + CPU utilization
 

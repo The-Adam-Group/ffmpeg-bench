@@ -42,7 +42,7 @@ FF_PID=$!
 
 RES2=$(monitor_process "$FF_PID" "$MONITOR_INTERVAL_MS" "$DUR")
 wait "$FF_PID"
-json_add "{\"label\":\"mp4_to_mp3_multithread\",\"threads\":auto,$(echo "$RES2" | sed 's/^{//;s/}$//')}"
+json_add "{\"label\":\"mp4_to_mp3_multithread\",\"threads\":\"auto\",$(echo "$RES2" | sed 's/^{//;s/}$//')}"
 log_bench "Multi-thread stats: $RES2"
 
 # ============================================================
@@ -56,7 +56,7 @@ FF_PID=$!
 
 RES3=$(monitor_process "$FF_PID" "$MONITOR_INTERVAL_MS" "$DUR")
 wait "$FF_PID"
-json_add "{\"label\":\"mp4_to_mp4_reencode\",\"threads\":auto,$(echo "$RES3" | sed 's/^{//;s/}$//')}"
+json_add "{\"label\":\"mp4_to_mp4_reencode\",\"threads\":\"auto\",$(echo "$RES3" | sed 's/^{//;s/}$//')}"
 log_bench "Re-encode stats: $RES3"
 
 # ============================================================
@@ -81,8 +81,8 @@ PRES1=$(cat "$RESOURCES_DIR/mon1.json")
 PRES2=$(cat "$RESOURCES_DIR/mon2.json")
 wait $P1 $P2
 
-json_add "{\"label\":\"mp4_to_mp3_parallel2_proc1\",\"threads\":auto,$(echo "$PRES1" | sed 's/^{//;s/}$//')}"
-json_add "{\"label\":\"mp4_to_mp3_parallel2_proc2\",\"threads\":auto,$(echo "$PRES2" | sed 's/^{//;s/}$//')}"
+json_add "{\"label\":\"mp4_to_mp3_parallel2_proc1\",\"threads\":\"auto\",$(echo "$PRES1" | sed 's/^{//;s/}$//')}"
+json_add "{\"label\":\"mp4_to_mp3_parallel2_proc2\",\"threads\":\"auto\",$(echo "$PRES2" | sed 's/^{//;s/}$//')}"
 log_bench "Parallel proc1: $PRES1"
 log_bench "Parallel proc2: $PRES2"
 
@@ -95,7 +95,7 @@ FF_PID=$!
 
 RES4=$(monitor_process "$FF_PID" "$MONITOR_INTERVAL_MS" "$DUR")
 wait "$FF_PID"
-json_add "{\"label\":\"mp4_stream_copy\",\"threads\":auto,$(echo "$RES4" | sed 's/^{//;s/}$//')}"
+json_add "{\"label\":\"mp4_stream_copy\",\"threads\":\"auto\",$(echo "$RES4" | sed 's/^{//;s/}$//')}"
 log_bench "Stream copy stats: $RES4"
 
 rm -rf "$RESOURCES_DIR"
