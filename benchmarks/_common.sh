@@ -214,19 +214,112 @@ now_ms() {
     fi
 }
 
-# Runs a command and prints JSON timing object
+# Runs a command, capturing ffmpeg's native -benchmark / -stats output into a
+# log file so the numbers can be parsed into result entries.
+#   echo "$@" -loglevel info -benchmark >/dev/null 2>"$logfile"
+ffbench_capture() {
+    local logfile="$1"; shift
+    "$@" -loglevel info -benchmark >/dev/null 2>"$logfile"
+}
+
+# parse_ff_bench <logfile> -> JSON fragment "ff_*" fields (no braces).
+# Parses the final -stats line (fps / speed) and the -benchmark summary
+# (utime/stime/rtime in ms, maxrss in kB). Tolerant of audio-only runs that
+# have no frame= token and of scientific-notation speed= values.
+parse_ff_bench() {
+    awk '
+    function grab(k,   s) {
+        s = $0;
+        if (match(s, k "=[[:space:]]*[^[:space:]]+")) {
+            s = substr(s, RSTART, RLENGTH);
+            sub(/^[A-Za-z_]+=[[:space:]]*/, "", s);
+            sub(/x$/, "", s);
+            sub(/s$/, "", s);
+            sub(/KiB$/, "", s);
+            return s;
+        }
+        return "";
+    }
+    { if ($0 ~ /bench: utime=/) { U=grab("utime"); S=grab("stime"); R=grab("rtime") }
+      if ($0 ~ /bench: maxrss=/) { M=grab("maxrss") }
+      if ($0 ~ /speed=/) { SP=grab("speed") }
+      if ($0 ~ /fps=/)   { FR=grab("fps") }
+    }
+    END {
+        out=""
+        if (FR!="") out=out "\"ff_fps\":" FR ","
+        if (SP!="") out=out "\"ff_speed_x\":" SP ","
+        if (U!="")  out=out "\"ff_user_ms\":" U*1000 ","
+        if (S!="")  out=out "\"ff_sys_ms\":" S*1000 ","
+        if (R!="")  out=out "\"ff_real_ms\":" R*1000 ","
+        if (M!="")  out=out "\"ff_maxrss_kb\":" M
+        sub(/,$/, "", out)
+        if (out!="") print out
+    }' "$1"
+}
+
+# agg_ff_bench <glob...> -> aggregate "ff_*" fragment across many capture logs
+# (parallel jobs or sequential chunk encodes). Sums usertime/systime/rtime and
+# fps/speed; keeps the max maxrss; counts the processes.
+agg_ff_bench() {
+    awk '
+    function grab(k,   s) {
+        s = $0;
+        if (match(s, k "=[[:space:]]*[^[:space:]]+")) {
+            s = substr(s, RSTART, RLENGTH);
+            sub(/^[A-Za-z_]+=[[:space:]]*/, "", s);
+            sub(/x$/, "", s);
+            sub(/s$/, "", s);
+            sub(/KiB$/, "", s);
+            return s;
+        }
+        return "";
+    }
+    { if (FNR==1) procs++
+      if ($0 ~ /bench: utime=/) { U+=grab("utime"); S+=grab("stime"); R+=grab("rtime") }
+      if ($0 ~ /bench: maxrss=/) { m=grab("maxrss"); if (m+0 > M+0) M=m }
+      if ($0 ~ /speed=/) { SP+=grab("speed") }
+      if ($0 ~ /fps=/)   { FR+=grab("fps") }
+    }
+    END {
+        out=""
+        if (FR!=0) out=out "\"ff_fps\":" FR ","
+        if (SP!=0) out=out "\"ff_speed_x\":" SP ","
+        if (U!=0)  out=out "\"ff_user_ms\":" U*1000 ","
+        if (S!=0)  out=out "\"ff_sys_ms\":" S*1000 ","
+        if (R!=0)  out=out "\"ff_real_ms\":" R*1000 ","
+        out=out "\"ff_maxrss_kb\":" M ","
+        out=out "\"ff_procs\":" procs
+        print out
+    }' "$@"
+}
+
+# Runs a command and prints JSON timing object (plus native ffmpeg stats when
+# the command is ffmpeg and -benchmark output is produced)
 bench_run() {
     local label="$1"; shift
     local start end elapsed_ms
+    local logfile
+    logfile=$(mktemp "${RESULTS_DIR}/.ffbench_XXXXXX" 2>/dev/null || mktemp "${TMPDIR:-/tmp}/ffbench_XXXXXX")
     start=$(now_ms)
     local exit_code=0
-    "$@" || exit_code=$?
+    "$@" -loglevel info -benchmark >/dev/null 2>"$logfile" || exit_code=$?
     end=$(now_ms)
     elapsed_ms=$(calc "($end - $start) / 1" 1)
 
-    cat <<EOF
+    local ff
+    ff=$(parse_ff_bench "$logfile")
+    rm -f "$logfile"
+
+    if [[ -n "$ff" ]]; then
+        cat <<EOF
+{"label":"$label","elapsed_ms":$elapsed_ms,"exit_code":$exit_code,$ff}
+EOF
+    else
+        cat <<EOF
 {"label":"$label","elapsed_ms":$elapsed_ms,"exit_code":$exit_code}
 EOF
+    fi
 }
 
 # --- JSON helpers ---

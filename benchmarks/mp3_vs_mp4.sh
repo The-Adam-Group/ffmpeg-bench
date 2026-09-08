@@ -57,7 +57,7 @@ split_mp4() {   # in seg_time prefix
     rm -f "$prefix"_*.mp4
     $FFMPEG -i "$in" -c copy \
         -f segment -segment_time "$seg_time" -reset_timestamps 1 \
-        "$prefix"_%03d.mp4 -y -loglevel error -stats 2>/dev/null
+        "$prefix"_%03d.mp4 -y -loglevel info -benchmark 2>"$prefix.fflog"
     shopt -s nullglob
     printf '%s\n' "$prefix"_*.mp4 | wc -l | tr -d ' '
     shopt -u nullglob
@@ -68,7 +68,7 @@ split_mp3() {   # mp3 splits sample-accurately (frame-aligned) with -c copy
     rm -f "$prefix"_*.mp3
     $FFMPEG -i "$in" -c copy \
         -f segment -segment_time "$seg_time" -reset_timestamps 1 \
-        "$prefix"_%03d.mp3 -y -loglevel error -stats 2>/dev/null
+        "$prefix"_%03d.mp3 -y -loglevel info -benchmark 2>"$prefix.fflog"
     shopt -s nullglob
     printf '%s\n' "$prefix"_*.mp3 | wc -l | tr -d ' '
     shopt -u nullglob
@@ -104,7 +104,13 @@ run_split_bench() {
     stats=$(read_pool_monitor "$mon_json")
     elapsed_ms=$(calc "($end_ms - $start_ms) / 1" 1)
 
-    json_add "{\"label\":\"$label\",\"format\":\"$format\",\"chunk_seconds\":$seg_time,\"elapsed_ms\":$elapsed_ms,\"produced_chunks\":$count,$(echo "$stats" | sed 's/^{//;s/}$//')}"
+    local ff=""
+    if [[ -f "$prefix.fflog" ]]; then
+        ff=$(parse_ff_bench "$prefix.fflog")
+        rm -f "$prefix.fflog"
+    fi
+
+    json_add "{\"label\":\"$label\",\"format\":\"$format\",\"chunk_seconds\":$seg_time,\"elapsed_ms\":$elapsed_ms,\"produced_chunks\":$count,$(echo "$stats" | sed 's/^{//;s/}$//')${ff:+,$ff}}"
     log_bench "$label: ${elapsed_ms}ms, ${count} chunks"
 }
 
@@ -136,10 +142,10 @@ convert_mp4_chunks() {   # prefix listfile concatfile
     : > "$listfile"
     for cfi in "${files[@]}"; do
         local out="${cfi%.mp4}.mp3"
-        $FFMPEG -i "$cfi" -vn -c:a libmp3lame -b:a 192k "$out" -y -loglevel error 2>/dev/null || true
+        $FFMPEG -i "$cfi" -vn -c:a libmp3lame -b:a 192k "$out" -y -loglevel info -benchmark 2>"$out.fflog" || true
         echo "file '$out'" >> "$listfile"
     done
-    [[ -s "$listfile" ]] && $FFMPEG -f concat -safe 0 -i "$listfile" -c copy "$concatfile" -y -loglevel error 2>/dev/null || true
+    [[ -s "$listfile" ]] && $FFMPEG -f concat -safe 0 -i "$listfile" -c copy "$concatfile" -y -loglevel info -benchmark 2>"$concatfile.fflog" || true
 }
 
 convert_mp3_chunks() {   # prefix listfile concatfile (re-encode each chunk)
@@ -150,10 +156,10 @@ convert_mp3_chunks() {   # prefix listfile concatfile (re-encode each chunk)
     : > "$listfile"
     for cfi in "${files[@]}"; do
         local out="${cfi%.mp3}_reenc.mp3"
-        $FFMPEG -i "$cfi" -c:a libmp3lame -b:a 192k "$out" -y -loglevel error 2>/dev/null || true
+        $FFMPEG -i "$cfi" -c:a libmp3lame -b:a 192k "$out" -y -loglevel info -benchmark 2>"$out.fflog" || true
         echo "file '$out'" >> "$listfile"
     done
-    [[ -s "$listfile" ]] && $FFMPEG -f concat -safe 0 -i "$listfile" -c copy "$concatfile" -y -loglevel error 2>/dev/null || true
+    [[ -s "$listfile" ]] && $FFMPEG -f concat -safe 0 -i "$listfile" -c copy "$concatfile" -y -loglevel info -benchmark 2>"$concatfile.fflog" || true
 }
 
 run_chunk_bench() {
@@ -187,7 +193,18 @@ run_chunk_bench() {
 
     [[ -f "$concatfile" ]] && out_size=$(file_size_kb "$concatfile")
 
-    json_add "{\"label\":\"$label\",\"format\":\"$format\",\"chunk_seconds\":$seg_time,\"produced_chunks\":${produced:-0},\"split_ms\":$split_ms,\"convert_ms\":$convert_ms,\"total_ms\":$total_ms,\"output_bytes\":$out_size,$(echo "$stats" | sed 's/^{//;s/}$//')}"
+    local ff
+    shopt -s nullglob
+    local fflogs=("$prefix"_*.fflog "$concatfile.fflog")
+    shopt -u nullglob
+    if [[ ${#fflogs[@]} -gt 0 ]]; then
+        ff=$(agg_ff_bench "${fflogs[@]}")
+        rm -f "${fflogs[@]}" "$prefix".fflog
+    else
+        ff=""
+    fi
+
+    json_add "{\"label\":\"$label\",\"format\":\"$format\",\"chunk_seconds\":$seg_time,\"produced_chunks\":${produced:-0},\"split_ms\":$split_ms,\"convert_ms\":$convert_ms,\"total_ms\":$total_ms,\"output_bytes\":$out_size,$(echo "$stats" | sed 's/^{//;s/}$//')${ff:+,$ff}}"
     log_bench "$label: total=${total_ms}ms (split=${split_ms}ms convert=${convert_ms}ms), ${produced:-0} chunks"
 }
 
@@ -211,13 +228,14 @@ run_processing_bench() {
     local label="$1" input="$2" output="$3"
     shift 3
     local start_ms end_ms
-    local stats
+    local stats ff fflog
     local mon_json="$WORK_DIR/mon_${label}.json"
 
     log_bench "Processing: $label"
     start_ms=$(now_ms)
 
-    $FFMPEG -i "$input" "$@" "$output" -y -loglevel error &
+    fflog="$WORK_DIR/ff_${label}.log"
+    $FFMPEG -i "$input" "$@" "$output" -y -loglevel info -benchmark 2>"$fflog" &
     FF_PID=$!
     monitor_process "$FF_PID" 100 "$DUR" > "$mon_json" &
     MON_PID=$!
@@ -228,6 +246,11 @@ run_processing_bench() {
     elapsed_ms=$(calc "($end_ms - $start_ms) / 1" 1)
 
     stats=$(cat "$mon_json" 2>/dev/null)
+    local ff=""
+    if [[ -f "$fflog" ]]; then
+        ff=$(parse_ff_bench "$fflog")
+        rm -f "$fflog"
+    fi
     local speed_x wall_s
     wall_s=$(calc "$elapsed_ms / 1000" 3)
     speed_x=$(calc "$DUR / $wall_s" 2)
@@ -236,7 +259,7 @@ run_processing_bench() {
         stats='{"peak_rss_kb":0,"avg_cpu_percent":0,"samples":0}'
     fi
 
-    json_add "{\"label\":\"$label\",\"input_format\":\"${label%%_*}\",\"elapsed_ms\":$elapsed_ms,\"speed_x\":$speed_x,$(echo "$stats" | sed 's/^{//;s/}$//')}"
+    json_add "{\"label\":\"$label\",\"input_format\":\"${label%%_*}\",\"elapsed_ms\":$elapsed_ms,\"speed_x\":$speed_x,$(echo "$stats" | sed 's/^{//;s/}$//')${ff:+,$ff}}"
     log_bench "  $label: ${elapsed_ms}ms (${speed_x}x) | $stats"
 }
 

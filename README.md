@@ -109,9 +109,32 @@ Every run is appended to `results/history.jsonl` automatically (unless
 ```bash
 tools/graph_report.sh            # results/report.html (SVG, no deps)
 tools/graph_report.sh --top 20   # show last 20 runs per series
+tools/graph_report.sh --line --metric ff_real_ms # trend lines instead of bars
+tools/graph_report.sh --metric ff_fps            # chart ffmpeg-native fps
 ```
 
 `history.jsonl` is plain line-delimited JSON, so you can diff runs or grep them.
+
+Besides the harness's own wall-clock and resource fields, every measured ffmpeg
+run also captures ffmpeg's native `-benchmark` output (added through
+`bench_run`/`parse_ff_bench`/`agg_ff_bench` in `benchmarks/_common.sh`). These
+are stored side-by-side with the harness metrics as `ff_*` fields:
+
+| Harness field | Meaning |
+| ------------- | ------- |
+| `elapsed_ms` / `total_ms` | Wall clock measured by the harness (includes spawn) |
+| `peak_rss_kb`, `avg_cpu_percent` | OS-level process monitoring (per-process / pool) |
+| `ff_fps` | ffmpeg's reported encoding fps (video sites) |
+| `ff_speed_x` | ffmpeg's reported speed vs realtime |
+| `ff_user_ms` / `ff_sys_ms` | ffmpeg's utime / stime |
+| `ff_real_ms` | ffmpeg's own wall clock (`rtime`) — close to `elapsed_ms` |
+| `ff_maxrss_kb` | ffmpeg's reported peak RSS |
+| `ff_procs` | (aggregated entries) number of ffmpeg processes summed |
+
+`--metric KEY` picks the y-axis value for charts (default `elapsed_ms`, falling
+back to `total_ms`; other metrics skip rows that lack the field), and `--line`
+renders a trend polyline with delta between first and last run, colored per GPU
+backend.
 
 ### Difficulty presets
 

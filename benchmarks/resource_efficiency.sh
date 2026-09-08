@@ -24,12 +24,14 @@ json_begin
 # ============================================================
 log_bench "--- MP4 -> MP3 with 1 thread ---"
 $FFMPEG -i "$INPUT" -vn -c:a libmp3lame -b:a 192k -threads 1 \
-    "$RESOURCES_DIR/single_thread.mp3" -y -loglevel error &
+    "$RESOURCES_DIR/single_thread.mp3" -y -loglevel info -benchmark 2>"$RESOURCES_DIR/ff_1.log" &
 FF_PID=$!
 
 RES1=$(monitor_process "$FF_PID" "$MONITOR_INTERVAL_MS" "$DUR")
 wait "$FF_PID"
-json_add "{\"label\":\"mp4_to_mp3_singlethread\",\"threads\":1,$(echo "$RES1" | sed 's/^{//;s/}$//')}"
+FF1=$(parse_ff_bench "$RESOURCES_DIR/ff_1.log")
+rm -f "$RESOURCES_DIR/ff_1.log"
+json_add "{\"label\":\"mp4_to_mp3_singlethread\",\"threads\":1,$(echo "$RES1" | sed 's/^{//;s/}$//')${FF1:+,$FF1}}"
 log_bench "Single-thread stats: $RES1"
 
 # ============================================================
@@ -37,12 +39,14 @@ log_bench "Single-thread stats: $RES1"
 # ============================================================
 log_bench "--- MP4 -> MP3 with default threads ---"
 $FFMPEG -i "$INPUT" -vn -c:a libmp3lame -b:a 192k \
-    "$RESOURCES_DIR/multi_thread.mp3" -y -loglevel error &
+    "$RESOURCES_DIR/multi_thread.mp3" -y -loglevel info -benchmark 2>"$RESOURCES_DIR/ff_2.log" &
 FF_PID=$!
 
 RES2=$(monitor_process "$FF_PID" "$MONITOR_INTERVAL_MS" "$DUR")
 wait "$FF_PID"
-json_add "{\"label\":\"mp4_to_mp3_multithread\",\"threads\":\"auto\",$(echo "$RES2" | sed 's/^{//;s/}$//')}"
+FF2=$(parse_ff_bench "$RESOURCES_DIR/ff_2.log")
+rm -f "$RESOURCES_DIR/ff_2.log"
+json_add "{\"label\":\"mp4_to_mp3_multithread\",\"threads\":\"auto\",$(echo "$RES2" | sed 's/^{//;s/}$//')${FF2:+,$FF2}}"
 log_bench "Multi-thread stats: $RES2"
 
 # ============================================================
@@ -52,12 +56,14 @@ log_bench "--- MP4 -> MP4 re-encode ---"
 resolve_backend h264
 $FFMPEG -i "$INPUT" $(video_enc_opts h264 crf 23 fast) \
     -c:a aac -b:a 128k \
-    "$RESOURCES_DIR/reencode.mp4" -y -loglevel error &
+    "$RESOURCES_DIR/reencode.mp4" -y -loglevel info -benchmark 2>"$RESOURCES_DIR/ff_3.log" &
 FF_PID=$!
 
 RES3=$(monitor_process "$FF_PID" "$MONITOR_INTERVAL_MS" "$DUR")
 wait "$FF_PID"
-json_add "{\"label\":\"mp4_to_mp4_reencode\",\"threads\":\"auto\",$(echo "$RES3" | sed 's/^{//;s/}$//')}"
+FF3=$(parse_ff_bench "$RESOURCES_DIR/ff_3.log")
+rm -f "$RESOURCES_DIR/ff_3.log"
+json_add "{\"label\":\"mp4_to_mp4_reencode\",\"threads\":\"auto\",$(echo "$RES3" | sed 's/^{//;s/}$//')${FF3:+,$FF3}}"
 log_bench "Re-encode stats: $RES3"
 
 # ============================================================
@@ -66,10 +72,10 @@ log_bench "Re-encode stats: $RES3"
 log_bench "--- 2 parallel MP4 -> MP3 conversions ---"
 NPROC_JOBS=2
 $FFMPEG -i "$INPUT" -vn -c:a libmp3lame -b:a 192k \
-    "$RESOURCES_DIR/par1.mp3" -y -loglevel error &
+    "$RESOURCES_DIR/par1.mp3" -y -loglevel info -benchmark 2>"$RESOURCES_DIR/ff_4.log" &
 P1=$!
 $FFMPEG -i "$INPUT" -vn -c:a libmp3lame -b:a 192k \
-    "$RESOURCES_DIR/par2.mp3" -y -loglevel error &
+    "$RESOURCES_DIR/par2.mp3" -y -loglevel info -benchmark 2>"$RESOURCES_DIR/ff_5.log" &
 P2=$!
 
 # Track combined resource usage — monitor BOTH processes concurrently
@@ -81,9 +87,12 @@ wait "$M1" "$M2"
 PRES1=$(cat "$RESOURCES_DIR/mon1.json")
 PRES2=$(cat "$RESOURCES_DIR/mon2.json")
 wait $P1 $P2
+FF4=$(parse_ff_bench "$RESOURCES_DIR/ff_4.log")
+FF5=$(parse_ff_bench "$RESOURCES_DIR/ff_5.log")
+rm -f "$RESOURCES_DIR/ff_4.log" "$RESOURCES_DIR/ff_5.log"
 
-json_add "{\"label\":\"mp4_to_mp3_parallel2_proc1\",\"threads\":\"auto\",$(echo "$PRES1" | sed 's/^{//;s/}$//')}"
-json_add "{\"label\":\"mp4_to_mp3_parallel2_proc2\",\"threads\":\"auto\",$(echo "$PRES2" | sed 's/^{//;s/}$//')}"
+json_add "{\"label\":\"mp4_to_mp3_parallel2_proc1\",\"threads\":\"auto\",$(echo "$PRES1" | sed 's/^{//;s/}$//')${FF4:+,$FF4}}"
+json_add "{\"label\":\"mp4_to_mp3_parallel2_proc2\",\"threads\":\"auto\",$(echo "$PRES2" | sed 's/^{//;s/}$//')${FF5:+,$FF5}}"
 log_bench "Parallel proc1: $PRES1"
 log_bench "Parallel proc2: $PRES2"
 
@@ -91,12 +100,14 @@ log_bench "Parallel proc2: $PRES2"
 # 5. Video decode pipelining (stream copy vs re-encode)
 # ============================================================
 log_bench "--- MP4 stream copy (no re-encode) ---"
-$FFMPEG -i "$INPUT" -c copy "$RESOURCES_DIR/copy.mp4" -y -loglevel error &
+$FFMPEG -i "$INPUT" -c copy "$RESOURCES_DIR/copy.mp4" -y -loglevel info -benchmark 2>"$RESOURCES_DIR/ff_6.log" &
 FF_PID=$!
 
 RES4=$(monitor_process "$FF_PID" "$MONITOR_INTERVAL_MS" "$DUR")
 wait "$FF_PID"
-json_add "{\"label\":\"mp4_stream_copy\",\"threads\":\"auto\",$(echo "$RES4" | sed 's/^{//;s/}$//')}"
+FF6=$(parse_ff_bench "$RESOURCES_DIR/ff_6.log")
+rm -f "$RESOURCES_DIR/ff_6.log"
+json_add "{\"label\":\"mp4_stream_copy\",\"threads\":\"auto\",$(echo "$RES4" | sed 's/^{//;s/}$//')${FF6:+,$FF6}}"
 log_bench "Stream copy stats: $RES4"
 
 rm -rf "$RESOURCES_DIR"

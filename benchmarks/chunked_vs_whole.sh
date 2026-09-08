@@ -54,7 +54,7 @@ split_copy() {  # keyframe-limited, minimal cost
     rm -f "$out_prefix"_*.mp4
     $FFMPEG -i "$in_file" -c copy \
         -f segment -segment_time "$seg_time" -reset_timestamps 1 \
-        "$out_prefix"_%03d.mp4 -y -loglevel error -stats 2>/dev/null
+        "$out_prefix"_%03d.mp4 -y -loglevel info -benchmark 2>"$out_prefix.fflog"
     shopt -s nullglob
     printf '%s\n' "$out_prefix"_*.mp4 | wc -l | tr -d ' '
     shopt -u nullglob
@@ -67,7 +67,7 @@ split_exact() {  # re-encode with forced keyframes at every cut point
         -c:a copy \
         -force_key_frames "expr:gte(t,n_forced*$seg_time)" \
         -f segment -segment_time "$seg_time" -reset_timestamps 1 \
-        "$out_prefix"_%03d.mp4 -y -loglevel error -stats 2>/dev/null
+        "$out_prefix"_%03d.mp4 -y -loglevel info -benchmark 2>"$out_prefix.fflog"
     shopt -s nullglob
     printf '%s\n' "$out_prefix"_*.mp4 | wc -l | tr -d ' '
     shopt -u nullglob
@@ -84,14 +84,14 @@ convert_chunks_to_mp3() {
     for cfi in "${chunk_files[@]}"; do
         local mp3out="${cfi%.mp4}.mp3"
         $FFMPEG -i "$cfi" -vn -c:a libmp3lame -b:a 192k \
-            "$mp3out" -y -loglevel error 2>/dev/null || true
+            "$mp3out" -y -loglevel info -benchmark 2>"$mp3out.fflog" || true
         echo "file '$mp3out'" >> "$listfile"
     done
 
     local produced=0
     if [[ -s "$listfile" ]]; then
         if $FFMPEG -f concat -safe 0 -i "$listfile" -c copy \
-            "$concatfile" -y -loglevel error 2>/dev/null; then
+            "$concatfile" -y -loglevel info -benchmark 2>"$concatfile.fflog"; then
             produced=1
         fi
     fi
@@ -119,13 +119,24 @@ run_chunked_pipeline() {
     [[ -f "$concatfile" ]] && out_size=$(file_size_kb "$concatfile")
 
     local json
+    shopt -s nullglob
+    local fflogs=("$prefix.fflog" "$prefix"_*.fflog "$concatfile.fflog")
+    shopt -u nullglob
+    local ff=""
+    if [[ ${#fflogs[@]} -gt 0 ]]; then
+        ff=$(agg_ff_bench "${fflogs[@]}")
+        rm -f "${fflogs[@]}"
+    fi
+
     json="{\"label\":\"$label\",\"chunk_seconds\":$seg_time,"
     json+="\"produced_chunks\":${produced_chunks:-0},"
     json+="\"split_ms\":${split_time:-0},"
     json+="\"convert_ms\":${convert_time:-0},"
     json+="\"total_ms\":$total_ms,"
     json+="\"concat_succeeded\":$produced_concat,"
-    json+="\"output_bytes\":${out_size:-0}}"
+    json+="\"output_bytes\":${out_size:-0}"
+    [[ -n "$ff" ]] && json+=",$ff"
+    json+="}"
     json_add "$json"
     log_bench "$label: total=${total_ms}ms (split=${split_time}ms + convert=${convert_time}ms), chunks=${produced_chunks:-0}"
 

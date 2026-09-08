@@ -49,7 +49,7 @@ MP3_START=$(now_ms)
 pids=(); active=0
 for (( i=0; i<TOTAL_FILES; i++ )); do
     $FFMPEG -i "${INPUTS[$i]}" -vn -c:a libmp3lame -b:a 192k \
-        "$WORK_DIR_MP3/out_${i}.mp3" -y -loglevel error 2>/dev/null &
+        "$WORK_DIR_MP3/out_${i}.mp3" -y -loglevel info -benchmark 2>"$WORK_DIR_MP3/ff_${i}.log" &
     pids+=($!); active=$((active + 1))
     if (( active >= PARALLEL_JOBS )); then
         wait "${pids[0]}" 2>/dev/null || true
@@ -60,10 +60,22 @@ wait
 MP3_END=$(now_ms)
 MP3_MS=$(calc "($MP3_END - $MP3_START) / 1" 1)
 
+shopt -s nullglob
+_ff_logs=("$WORK_DIR_MP3"/ff_*.log)
+shopt -u nullglob
+if [[ ${#_ff_logs[@]} -gt 0 ]]; then
+    MP3_FF=$(agg_ff_bench "${_ff_logs[@]}")
+    rm -f "${_ff_logs[@]}"
+else
+    MP3_FF=""
+fi
+
 mp3_total_size=$(find "$WORK_DIR_MP3" -name "*.mp3" -type f -exec stat -c%s {} + 2>/dev/null \
     | awk '{s+=$1}END{print s}' || echo 0)
 
-MP3_JSON="{\"label\":\"parallel_mp4_to_mp3\",\"jobs\":$PARALLEL_JOBS,\"total_ms\":$MP3_MS,\"files\":$TOTAL_FILES,\"output_total_bytes\":$mp3_total_size}"
+MP3_JSON="{\"label\":\"parallel_mp4_to_mp3\",\"jobs\":$PARALLEL_JOBS,\"total_ms\":$MP3_MS,\"files\":$TOTAL_FILES,\"output_total_bytes\":$mp3_total_size"
+[[ -n "$MP3_FF" ]] && MP3_JSON="$MP3_JSON,$MP3_FF"
+MP3_JSON="$MP3_JSON}"
 json_add "$MP3_JSON"
 log_bench "Parallel MP3: ${MP3_MS}ms | output: $(calc "${mp3_total_size:-0}/1048576" 1)MB"
 
@@ -76,7 +88,7 @@ for (( i=0; i<TOTAL_FILES; i++ )); do
     $FFMPEG -i "${INPUTS[$i]}" \
         $(video_enc_opts h264 crf 23 fast) \
         -c:a aac -b:a 128k \
-        "$WORK_DIR_MP4/out_${i}.mp4" -y -loglevel error 2>/dev/null &
+        "$WORK_DIR_MP4/out_${i}.mp4" -y -loglevel info -benchmark 2>"$WORK_DIR_MP4/ff_${i}.log" &
     pids+=($!); active=$((active + 1))
     if (( active >= PARALLEL_JOBS )); then
         wait "${pids[0]}" 2>/dev/null || true
@@ -87,10 +99,22 @@ wait
 MP4_END=$(now_ms)
 MP4_MS=$(calc "($MP4_END - $MP4_START) / 1" 1)
 
+shopt -s nullglob
+_ff_logs=("$WORK_DIR_MP4"/ff_*.log)
+shopt -u nullglob
+if [[ ${#_ff_logs[@]} -gt 0 ]]; then
+    MP4_FF=$(agg_ff_bench "${_ff_logs[@]}")
+    rm -f "${_ff_logs[@]}"
+else
+    MP4_FF=""
+fi
+
 mp4_total_size=$(find "$WORK_DIR_MP4" -name "*.mp4" -type f -exec stat -c%s {} + 2>/dev/null \
     | awk '{s+=$1}END{print s}' || echo 0)
 
-MP4_JSON="{\"label\":\"parallel_mp4_to_mp4\",\"jobs\":$PARALLEL_JOBS,\"total_ms\":$MP4_MS,\"files\":$TOTAL_FILES,\"output_total_bytes\":$mp4_total_size}"
+MP4_JSON="{\"label\":\"parallel_mp4_to_mp4\",\"jobs\":$PARALLEL_JOBS,\"total_ms\":$MP4_MS,\"files\":$TOTAL_FILES,\"output_total_bytes\":$mp4_total_size"
+[[ -n "$MP4_FF" ]] && MP4_JSON="$MP4_JSON,$MP4_FF"
+MP4_JSON="$MP4_JSON}"
 json_add "$MP4_JSON"
 log_bench "Parallel MP4: ${MP4_MS}ms | output: $(calc "${mp4_total_size:-0}/1048576" 1)MB"
 
