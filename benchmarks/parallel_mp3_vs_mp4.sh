@@ -69,11 +69,12 @@ log_bench "Parallel MP3: ${MP3_MS}ms | output: $(calc "${mp3_total_size:-0}/1048
 
 # --- Parallel MP4 -> MP4 (re-encode) ---
 log_bench "Running parallel MP4 -> MP4 re-encode ($PARALLEL_JOBS jobs)..."
+resolve_backend h264
 MP4_START=$(now_ms)
 pids=(); active=0
 for (( i=0; i<TOTAL_FILES; i++ )); do
     $FFMPEG -i "${INPUTS[$i]}" \
-        -c:v libx264 -preset fast -crf 23 \
+        $(video_enc_opts h264 crf 23 fast) \
         -c:a aac -b:a 128k \
         "$WORK_DIR_MP4/out_${i}.mp4" -y -loglevel error 2>/dev/null &
     pids+=($!); active=$((active + 1))

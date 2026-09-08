@@ -42,6 +42,149 @@ find_ffmpeg() {
     exit 1
 }
 
+# --- GPU acceleration toggle ------------------------------------
+# GPU_MODE: none (default) | auto | nvenc | qsv | amf | vaapi | videotoolbox
+#   none        = software encoders (libx264/libx265) — unchanged behaviour
+#   auto        = pick the first available hardware backend
+#   <backend>   = force that backend; falls back to software when unavailable
+# Any value is also accepted as the literal encoder name you want to try
+# (e.g. GPU_MODE=h264_nvenc) so exotic setups work too.
+GPU_MODE="${GPU_MODE:-none}"
+VENC_BEING="software"      # active backend: software|nvenc|qsv|amf|vaapi|videotoolbox|<custom>
+VENC_USED="libx264"        # encoder name of the last resolve_backend call
+GPU_ENCODERS_USED=""       # encoders actually used this run (for results/reporting)
+
+sw_enc() {   # sw_enc <codec> -> software encoder name
+    case "${1%-*}" in
+        hevc|h265|265) echo libx265 ;;
+        *) echo libx264 ;;
+    esac
+}
+
+backend_enc() {   # backend_enc <codec> <backend> -> hardware encoder name ('' if unknown)
+    local codec="$1" backend="$2"
+    case "$backend" in
+        nvenc)        echo "${codec}_nvenc" ;;
+        qsv)          echo "${codec}_qsv" ;;
+        amf)          echo "${codec}_amf" ;;
+        vaapi)        echo "${codec}_vaapi" ;;
+        videotoolbox) echo "${codec}_videotoolbox" ;;
+        *) echo "" ;;
+    esac
+}
+
+# encoder_available <name> -> "1" if the encoder exists in this ffmpeg build
+encoder_available() {
+    $FFMPEG -hide_banner -encoders 2>/dev/null | awk -v e="$1" '$2==e{print 1; exit}'
+}
+
+# encoder_usable <name> [extra_arg...] -> "1" if a 1-frame null encode succeeds
+# at runtime (driver/device present), cached per (name + args). Probes use a
+# 320x240 frame: large enough for NVENC's minimum dimension check.
+declare -A GPU_PROBE_CACHE
+encoder_usable() {
+    local name="$1"; shift
+    local key="$name ${*}"
+    if [[ -n "${GPU_PROBE_CACHE[$key]+set}" ]]; then
+        echo "${GPU_PROBE_CACHE[$key]}"
+        return
+    fi
+    local r=0
+    $FFMPEG -hide_banner -loglevel error -f lavfi -i testsrc2=duration=0.1:size=320x240:rate=25 \
+        -frames:v 1 -an "$@" -c:v "$name" -f null - </dev/null >/dev/null 2>&1 && r=1
+    GPU_PROBE_CACHE[$key]=$r
+    echo "$r"
+}
+
+# register a used encoder name for result reporting
+_gpu_note_enc() {
+    local w="$1"
+    case " $GPU_ENCODERS_USED " in
+        *" $w "*) ;;  # already noted
+        *) GPU_ENCODERS_USED="$GPU_ENCODERS_USED $w" ;;
+    esac
+}
+
+# resolve_backend <codec> — pick the video encoder for this codec (h264|hevc)
+# based on GPU_MODE. Sets VENC_BEING + VENC_USED. Never fails: falls back to
+# software (and logs) when a requested backend is missing.
+resolve_backend() {
+    local codec="$1" soft
+    soft=$(sw_enc "$codec")
+    VENC_BEING="software"
+    VENC_USED="$soft"
+    _gpu_note_enc "$soft"
+    [[ "$GPU_MODE" == none || -z "$GPU_MODE" ]] && return 0
+
+    local blist backend enc
+    case "$GPU_MODE" in
+        auto) blist="nvenc qsv amf vaapi videotoolbox" ;;
+        nvenc|qsv|amf|vaapi|videotoolbox) blist="$GPU_MODE" ;;
+        *) blist="$GPU_MODE" ;;   # treat as an explicit encoder name
+    esac
+
+    for backend in $blist; do
+        enc=$(backend_enc "$codec" "$backend")
+        [[ -n "$enc" ]] || enc="$backend"   # e.g. GPU_MODE=h264_nvenc
+        [[ -n "$enc" ]] || continue
+        local extra=()
+        [[ "$backend" == vaapi ]] && extra=(-vaapi_device /dev/dri/renderD128)
+        if [[ "$(encoder_available "$enc")" == 1 ]] && [[ "$(encoder_usable "$enc" "${extra[@]}")" == 1 ]]; then
+            VENC_BEING="$backend"
+            VENC_USED="$enc"
+            _gpu_note_enc "$enc"
+            log_info "GPU: $GPU_MODE -> $enc (runtime ok)"
+            return 0
+        fi
+    done
+    log_info "GPU: $GPU_MODE has no usable encoder for '$codec' — using $soft"
+    return 0
+}
+
+# video_enc_opts <codec> <mode> <value> [preset]
+#   codec : h264 | hevc (also accepts 264/265/h265 aliases)
+#   mode  : b|bitrate (value like "2000k")  or  crf|q|qp (quality number)
+#   preset: software preset (ignored for the fixed HW presets below)
+# Prints the ffmpeg option words to splice into an encode command, e.g.
+#   $(video_enc_opts h264 b 2000k fast)  ->  -c:v libx264 -preset fast -b:v 2000k
+#   $(video_enc_opts h264 crf 23 fast)   ->  -c:v libx264 -preset fast -crf 23
+# GPU backends map to their native quality controls (nvenc -cq, qsv
+# -global_quality, amf cqp, vaapi -qp; videotoolbox only supports bitrate).
+video_enc_opts() {
+    local codec="$1" mode="$2" value="$3" preset="${4:-fast}"
+    local soft
+    soft=$(sw_enc "$codec")
+    local isb=false
+    [[ "$mode" == b || "$mode" == bitrate || "$mode" == br ]] && isb=true
+
+    if [[ "$VENC_BEING" == software ]]; then
+        if $isb; then echo "-c:v $soft -preset $preset -b:v $value"
+        else         echo "-c:v $soft -preset $preset -crf $value"; fi
+        return 0
+    fi
+
+    case "$VENC_BEING" in
+        nvenc)
+            if $isb; then echo "-c:v $VENC_USED -preset p4 -b:v $value"
+            else         echo "-c:v $VENC_USED -preset p4 -rc vbr -cq $value"; fi ;;
+        qsv)
+            if $isb; then echo "-c:v $VENC_USED -preset veryfast -b:v $value"
+            else         echo "-c:v $VENC_USED -preset veryfast -global_quality $value"; fi ;;
+        amf)
+            if $isb; then echo "-c:v $VENC_USED -quality speed -b:v $value"
+            else         echo "-c:v $VENC_USED -quality speed -rc cqp -qp_i $value -qp_p $value -qp_b $value"; fi ;;
+        vaapi)
+            if $isb; then echo "-c:v $VENC_USED -vaapi_device /dev/dri/renderD128 -b:v $value"
+            else         echo "-c:v $VENC_USED -vaapi_device /dev/dri/renderD128 -qp $value"; fi ;;
+        videotoolbox)
+            echo "-c:v $VENC_USED -realtime 1 -b:v $value" ;;
+        *)
+            if $isb; then echo "-c:v $VENC_USED -b:v $value"
+            else         echo "-c:v $VENC_USED -crf $value"; fi ;;
+    esac
+    return 0
+}
+
 # --- Arithmetic helpers (portable: awk, no bc dependency) ---
 # calc "EXPR" [scale]  -> prints result truncated to `scale` (default 3) decimals
 # EXPR is embedded into awk's interpreter, so it IS evaluated (e.g. "1/3" -> 0.333)
@@ -97,10 +240,14 @@ json_add()   { JSON_ENTRIES+=("$1"); }
 assemble_result() {
     local name="$1" timestamp
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local gpu_encs
+    gpu_encs=$(echo "$GPU_ENCODERS_USED" | sed 's/^ *//;s/ *$//')
 
     echo "{"
     echo "  \"benchmark\": \"$name\","
     echo "  \"difficulty\": \"$DIFFICULTY\","
+    echo "  \"gpu\": \"$GPU_MODE\","
+    echo "  \"encoders\": \"$gpu_encs\","
     echo "  \"timestamp\": \"$timestamp\","
     echo "  \"ffmpeg_version\": \"$($FFMPEG -version 2>&1 | head -1)\","
     echo "  \"results\": ["

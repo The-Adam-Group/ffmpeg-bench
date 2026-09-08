@@ -63,7 +63,7 @@ split_copy() {  # keyframe-limited, minimal cost
 split_exact() {  # re-encode with forced keyframes at every cut point
     local in_file="$1" seg_time="$2" out_prefix="$3"
     rm -f "$out_prefix"_*.mp4
-    $FFMPEG -i "$in_file" -c:v libx264 -preset veryfast -crf 23 \
+    $FFMPEG -i "$in_file" $(video_enc_opts h264 crf 23 veryfast) \
         -c:a copy \
         -force_key_frames "expr:gte(t,n_forced*$seg_time)" \
         -f segment -segment_time "$seg_time" -reset_timestamps 1 \
@@ -135,6 +135,7 @@ run_chunked_pipeline() {
 # ============================================================
 # METHOD 1: Chunk by COUNT
 # ============================================================
+resolve_backend h264
 for n in $CHUNK_COUNTS; do
     seg_time=$(calc "$DUR / $n" 3)
     for method in $SPLIT_METHOD; do

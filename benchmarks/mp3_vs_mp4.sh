@@ -243,8 +243,9 @@ run_processing_bench() {
 run_processing_bench "mp3_to_mp3" "$AUDIO_IN" "$WORK_DIR/p_mp3.mp3" \
     -c:a libmp3lame -b:a 192k
 
+resolve_backend h264
 run_processing_bench "mp4_to_mp4" "$VIDEO_IN" "$WORK_DIR/p_mp4.mp4" \
-    -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k
+    $(video_enc_opts h264 crf 23 fast) -c:a aac -b:a 128k
 
 run_processing_bench "mp4_to_mp3" "$VIDEO_IN" "$WORK_DIR/p_mp3b.mp3" \
     -vn -c:a libmp3lame -b:a 192k

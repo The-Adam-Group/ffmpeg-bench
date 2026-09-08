@@ -37,6 +37,9 @@ FFMPEG_DECODERS=$($FFMPEG -decoders 2>&1 | grep -c '^[[:space:]]*[A-Z]' || echo 
 
 # GPU / HW accel
 HW_ACCEL=$($FFMPEG -hwaccels 2>&1 | tail -n +2 | tr '\n' ',' | sed 's/,$//')
+HW_ENCODERS=$($FFMPEG -hide_banner -encoders 2>&1 \
+    | awk '$2 ~ /_(nvenc|qsv|amf|vaapi|videotoolbox|mediacodec|v4l2m2m)$/ {print $2}' \
+    | sort | tr '\n' ',' | sed 's/,$//')
 
 # Disk speed (quick write test)
 DISK_TEST_FILE="$RESULTS_DIR/.disk_speed_test"
@@ -66,6 +69,7 @@ cat > "$OUTPUT" <<EOF
     "encoders_count": $FFMPEG_ENCODERS,
     "decoders_count": $FFMPEG_DECODERS,
     "hw_accel": "$HW_ACCEL",
+    "hw_encoders": "$HW_ENCODERS",
     "key_features": "$FFMPEG_CONFIG"
   }
 }

@@ -49,7 +49,8 @@ log_bench "Multi-thread stats: $RES2"
 # 3. MP4 re-encode (heavier: video + audio)
 # ============================================================
 log_bench "--- MP4 -> MP4 re-encode ---"
-$FFMPEG -i "$INPUT" -c:v libx264 -preset fast -crf 23 \
+resolve_backend h264
+$FFMPEG -i "$INPUT" $(video_enc_opts h264 crf 23 fast) \
     -c:a aac -b:a 128k \
     "$RESOURCES_DIR/reencode.mp4" -y -loglevel error &
 FF_PID=$!

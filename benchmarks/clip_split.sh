@@ -85,9 +85,10 @@ log_bench "Produced $ts_seg_count segments (timestamp-based)"
 # ============================================================
 log_bench "--- Split by timestamp with re-encode: every ${SEGMENT_INTERVAL}s ---"
 
+resolve_backend h264
 SPLIT_REENC_JSON=$(bench_run "split_by_timestamp_reencode_${SEGMENT_INTERVAL}s" \
     $FFMPEG -i "$INPUT" \
-        -c:v libx264 -preset fast -crf 23 \
+        $(video_enc_opts h264 crf 23 fast) \
         -c:a aac -b:a 128k \
         -f segment -segment_time "$SEGMENT_INTERVAL" -reset_timestamps 1 \
         "$SPLIT_DIR/seg_reenc_%03d.mp4" \

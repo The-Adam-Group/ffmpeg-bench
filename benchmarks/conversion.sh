@@ -31,6 +31,7 @@ for input in $(find_all_mp4_inputs); do
 done
 
 # --- Single file conversion: mp4 -> mp4 (re-encode) ---
+resolve_backend h264
 for input in $(find_all_mp4_inputs); do
     label=$(basename "$input" .mp4)
     outfile="$OUTPUTS_DIR/mp4/reenc_${label}.mp4"
@@ -38,7 +39,7 @@ for input in $(find_all_mp4_inputs); do
     log_bench "Re-encoding: $(basename "$input") -> mp4"
     REENC_JSON=$(bench_run "mp4_to_mp4_${label}" \
         $FFMPEG -i "$input" \
-            -c:v libx264 -preset fast -crf 23 \
+            $(video_enc_opts h264 crf 23 fast) \
             -c:a aac -b:a 128k \
             "$outfile" -y -loglevel error -stats)
     json_add "$REENC_JSON"
