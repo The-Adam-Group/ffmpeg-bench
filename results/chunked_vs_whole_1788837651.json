@@ -1,0 +1,15 @@
+{
+  "benchmark": "chunked_vs_whole",
+  "difficulty": "medium",
+  "timestamp": "2026-09-08T03:20:51Z",
+  "ffmpeg_version": "ffmpeg version n9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "results": [
+    {"label":"whole_file_mp4_to_mp3","elapsed_ms":365.0,"exit_code":0},
+    {"label":"chunk_by_count_copy_2","chunk_seconds":30.000,"produced_chunks":2,"split_ms":83.0,"convert_ms":480.0,"total_ms":571.0,"concat_succeeded":1,"output_bytes":1441374},
+    {"label":"chunk_by_count_exact_2","chunk_seconds":30.000,"produced_chunks":2,"split_ms":5690.0,"convert_ms":484.0,"total_ms":6182.0,"concat_succeeded":1,"output_bytes":1442002},
+    {"label":"chunk_by_count_copy_4","chunk_seconds":15.000,"produced_chunks":4,"split_ms":82.0,"convert_ms":583.0,"total_ms":672.0,"concat_succeeded":1,"output_bytes":1440120},
+    {"label":"chunk_by_count_exact_4","chunk_seconds":15.000,"produced_chunks":4,"split_ms":5696.0,"convert_ms":587.0,"total_ms":6290.0,"concat_succeeded":1,"output_bytes":1442000},
+    {"label":"chunk_by_time_copy_15s","chunk_seconds":15,"produced_chunks":4,"split_ms":83.0,"convert_ms":590.0,"total_ms":680.0,"concat_succeeded":1,"output_bytes":1440120},
+    {"label":"chunk_by_time_exact_15s","chunk_seconds":15,"produced_chunks":4,"split_ms":5661.0,"convert_ms":588.0,"total_ms":6256.0,"concat_succeeded":1,"output_bytes":1442000}
+  ]
+}

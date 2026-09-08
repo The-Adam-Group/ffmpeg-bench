@@ -1,0 +1,16 @@
+{
+  "benchmark": "conversion",
+  "difficulty": "medium",
+  "timestamp": "2026-09-08T03:19:26Z",
+  "ffmpeg_version": "ffmpeg version n9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "results": [
+    {"label":"mp4_to_mp3_test_default_1280x720_60s","elapsed_ms":368.0,"exit_code":0},
+    {"label":"mp4_to_mp3_test_short_1280x720_10s","elapsed_ms":108.0,"exit_code":0},
+    {"label":"mp4_to_mp4_test_default_1280x720_60s","elapsed_ms":8993.0,"exit_code":0},
+    {"label":"mp4_to_mp4_test_short_1280x720_10s","elapsed_ms":1606.0,"exit_code":0},
+    {"label":"mp4_to_mp3_preset_ultrafast","elapsed_ms":110.0,"exit_code":0},
+    {"label":"mp4_to_mp3_preset_fast","elapsed_ms":109.0,"exit_code":0},
+    {"label":"mp4_to_mp3_preset_medium","elapsed_ms":110.0,"exit_code":0},
+    {"label":"mp4_to_mp3_preset_slow","elapsed_ms":109.0,"exit_code":0}
+  ]
+}

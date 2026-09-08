@@ -1,0 +1,13 @@
+{
+  "benchmark": "speed",
+  "difficulty": "medium",
+  "timestamp": "2026-09-08T03:19:14Z",
+  "ffmpeg_version": "ffmpeg version n9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "results": [
+    {"label":"decode_only","elapsed_ms":218.0,"exit_code":0},
+    {"label":"encode_libx264","elapsed_ms":3989.0,"exit_code":0},
+    {"label":"encode_libx265","elapsed_ms":7957.0,"exit_code":0},
+    {"label":"transcode_h264_to_h264","elapsed_ms":1623.0,"exit_code":0},
+    {"label":"audio_decode_mp3","elapsed_ms":53.0,"exit_code":0}
+  ]
+}

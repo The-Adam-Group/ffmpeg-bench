@@ -1,0 +1,12 @@
+{
+  "benchmark": "clip_split",
+  "difficulty": "medium",
+  "timestamp": "2026-09-08T03:19:28Z",
+  "ffmpeg_version": "ffmpeg version n9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "results": [
+    {"label":"split_by_count_3","elapsed_ms":57.0,"exit_code":0},
+    {"label":"split_by_count_manual_3","elapsed_ms":170.0,"segments":3},
+    {"label":"split_by_timestamp_30s","elapsed_ms":58.0,"exit_code":0},
+    {"label":"split_by_timestamp_reencode_30s","elapsed_ms":1600.0,"exit_code":0}
+  ]
+}
