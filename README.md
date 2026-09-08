@@ -159,6 +159,114 @@ backend.
 | `mp3_vs_mp4` | Side-by-side mp3 vs mp4 for: splitting (time/count), chunking (split→convert→concat), processing (mp3↔mp3, mp4↔mp4, mp4→mp3, mp3→mp4). Reports wall time, produced chunks, and resource stats (peak RSS, CPU%, concurrency) via per-process and pool monitors |
 | `resource_efficiency` | Peak RSS + average CPU% for single/multi-thread, re-encode, parallel pairs, stream copy |
 
+## Interpreting the results
+
+This section explains what every number means, how it was measured, and what a
+"good" result looks like — so you can read `results/*.json`,
+`results/history.jsonl`, and `results/report.html` without guessing.
+
+### Data model and statistics
+
+- **One entry = one measurement.** Every benchmark site spawns ffmpeg (usually
+  once, or N-times for parallel sites) and its `elapsed_ms` (or `total_ms` for
+  multi-phase sites) is recorded. Each entry is a JSON object; all entries for
+  a run are written to `results/<benchmark>_<epoch>.json`.
+- **One history row = one entry**, tagged with `run` (epoch), `ts` (UTC),
+  `difficulty`, `gpu` (backend actually used), and `benchmark`. Rows are
+  append-only, one per entry, so the same series appears once per run.
+- **A "series" is `benchmark :: label`** (e.g. `conversion :: mp4_to_mp4_test_default_1280x720_60s`).
+  Charts group by series and keep the *last `--top N` runs* (default 12),
+  oldest → newest left to right.
+- **Bar chart** (default): one bar per run, height ∝ value, colored by GPU
+  backend, label showing the raw value.
+- **Line chart** (`--line --metric KEY`): polyline through the per-run values,
+  colored per backend, with a Δ% between the first and last run in the window.
+  For time/CPU metrics **lower is better**; for `ff_fps` and `speed_x`
+  **higher is better** (the chart meta text assumes time metrics).
+- **"Latest run" comparisons** (used throughout this doc) take the most recent
+  `ts` per series to avoid mixing old and new measurement instrumentation.
+
+### Field reference
+
+| Field | Meaning | Typical/notes |
+| ----- | ------- | ----- |
+| `elapsed_ms` | Harness wall clock from ffmpeg launch to exit, incl. process spawn | Long encodes ≈ `ff_real_ms` + ~10%; very short ops are spawn-dominated |
+| `total_ms`, `split_ms`, `convert_ms` | Multi-phase sites: total and per-phase wall time | Appears on chunk/split sites |
+| `speed_x` | Harness-computed realtime factor: input duration ÷ wall time | 1.0 = realtime; audio sites reach hundreds |
+| `jobs`, `speedup`, `efficiency_percent` | `parallel_vs_sequential`: speedup = seq ÷ parallel time; efficiency = speedup ÷ jobs | 2 jobs ≈ 1.85×/92%, 4 jobs ≈ 2.8×/70% on the reference box |
+| `produced_chunks` | Chunks actually emitted (may differ from requested for `-c copy`, which cuts at existing keyframes only) | Use `exact` split strategy for exact cuts |
+| `concat_succeeded` | Whether the chunked pipeline's final `-c copy` concat produced output | 0 possible when no chunks were produced |
+| `output_bytes` | Size of the produced file, for output-quality sanity checks |
+| `peak_rss_kb` | OS-monitored peak memory of the ffmpeg process | `0` only when the process was too short to sample |
+| `avg_cpu_percent` | OS-monitored average CPU%: ~100 = 1 core busy, ~400 = 4 cores | Decode+encode are ≥1 core; stream copy ~0 |
+| `peak_pool_rss_kb`, `peak_concurrent_ffmpeg`, `avg_cpu_total_percent`, `samples` | Pool monitor across parallel ffmpeg processes; `samples` = number of monitor ticks | `peak_concurrent_ffmpeg = 0` + `samples = 0` means the phase finished faster than one monitor tick — not an error |
+| `ff_fps` | ffmpeg's own reported encode fps (video sites only) | `0.0`/absent on audio-only sites by design |
+| `ff_speed_x` | ffmpeg's reported speed vs realtime | Can be scientific notation (`1.39e+03x`); relates to the site's input duration |
+| `ff_user_ms` / `ff_sys_ms` | ffmpeg `-benchmark` utime/stime (CPU time, all threads) | user+sys ÷ real ≈ cores actually busy |
+| `ff_real_ms` | ffmpeg's own wall clock (`rtime`) | **Best cross-check**: compare to `elapsed_ms`; with capture active they should track each other |
+| `ff_maxrss_kb` | ffmpeg's reported peak memory | Usually within a few % of harness `peak_rss_kb` |
+| `ff_procs` | Aggregated entries only: number of ffmpeg processes summed | A chunk pipeline = split + N converts + concat (e.g. 10 for 8 chunks) |
+
+### Gotchas / ambiguities
+
+- **Labels are stable across GPU backends on purpose** — `encode_libx264` ran
+  under `gpu: none` *and* `gpu: auto` (where the real encoder was h264_nvenc).
+  Compare series **within** one `gpu` value, or use `gpu` as the distinguishing
+  dimension. The actual backend is recorded in `gpu`, never in the label.
+- **Difficulty confound in historical data.** Before GPU capture was added, all
+  software (`none`) runs were recorded at `medium` difficulty and all `auto`
+  runs at `low`. So `medium/none` vs `low/auto` contrasts mix *both* input size
+  and backend. Cross-difficulty comparisons must use the **same** difficulty.
+  Exception: the `conversion` benchmark pins its inputs regardless of difficulty
+  (`test_short_1280x720_10s`, `test_default_1280x720_60s`), so its rows are
+  comparable across `none`/`auto` — those are the right pairs for GPU analysis.
+- **Missing `ff_*` fields.** Rows recorded before native `-benchmark` capture was
+  wired (older runs) have harness metrics only. `--metric` skips rows that lack
+  the requested field, so old rows don't pollute a trend.
+- **`samples = 0` / `peak_pool_rss_kb = 0`** on very fast phases is expected
+  (sub-tick), see table.
+- **`produced_chunks` can exceed the requested count** with `-c copy` because
+  keyframe intervals don't align with requested boundaries.
+
+### Numbers measured so far (reference machine: RTX 2060, ffmpeg n9.0.1)
+
+Annotated snapshot from the recorded history — good expectations for *this*
+class of hardware, not a guarantee on any other machine:
+
+| Workload | Software (x264/lame) | NVENC (`-g auto`) |
+| -------- | ------------------- | ----------------- |
+| mp4→mp4 re-encode, 60s 1280x720 | ~8.4 s, ~4 cores, ~348 MB | ~2.2 s, ~2 cores, ~284 MB (**~3.9×**) |
+| mp4→mp4 re-encode, 10s 1280x720 | ~1.5 s | ~0.6 s (**~2.4×**) |
+| mp4→mp3 audio extraction, 60s | ~0.45 s, ~1 core, ~56 MB (identical under `-g auto`: audio is never a GPU job) |
+| stream copy (`-c copy`) | ~20–90 ms, ~0% CPU, ~10 MB |
+| keyframe split (`-c copy`) | ~55–90 ms regardless of chunk count |
+| frame-exact split (forced-keyframe re-encode) | ~5.3 s / 60s | ~2.2 s / 60s |
+
+Observed rules of thumb:
+
+- **GPU advantage grows with duration**: 2.4× at 10 s → 3.9× at 60 s. Time
+  scales ~linearly with length; the ~200–500 ms ffmpeg startup/probe cost is a
+  fixed add-on that matters most for short clips.
+- **lame mp3 is single-threaded and preset-invariant**: `-threads 1` vs `auto`
+  = 312 vs 313 ms; ultrafast→slow presets all ≈ 365 ms. Don't tune those.
+- **Split once, copy cut often**: a keyframe-aligned re-encode costs ~2.2 s
+  (GPU) once, then every timestamp cut is a ~85 ms stream copy.
+- **Batch parallelism**: 2 jobs ≈ 92% efficient, 4 jobs ≈ 70%. More NVENC
+  sessions contend on the shared encoder; more audio jobs contend on CPU decode.
+
+### Reproducing and verifying
+
+- Inputs are synthetic (`testsrc2` + sine) and generated with software encoders
+  only, so media is identical across runs/backends. Drop real files into
+  `inputs/` to benchmark those.
+- To re-verify the GPU claims above on your box:
+  `./run_benchmarks.sh -d medium -g none conversion`
+  then `./run_benchmarks.sh -d medium -g auto conversion` and compare the
+  `test_default_1280x720_60s` rows.
+- Cross-check capture health: `ff_real_ms` should sit within ~10% of
+  `elapsed_ms` on long encodes, and `ff_maxrss_kb` within a few % of
+  `peak_rss_kb`.
+
 ## Installing just ffmpeg
 
 ```bash
